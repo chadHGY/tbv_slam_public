@@ -3,7 +3,8 @@ FROM ros:noetic-perception
 # Install build dependencies
 RUN apt-get clean && \
     apt-get update && \
-    apt-get install -y wget software-properties-common python3-catkin-tools libgoogle-glog-dev libgflags-dev libatlas-base-dev libeigen3-dev libsuitesparse-dev libfmt-dev psmisc ros-noetic-tf-conversions libboost-all-dev python3-pybind11 libzip-dev python3-pip libspdlog-dev ros-noetic-rviz && \
+    apt-get install -y wget software-properties-common python3-catkin-tools libgoogle-glog-dev libgflags-dev libatlas-base-dev libeigen3-dev libsuitesparse-dev libfmt-dev psmisc ros-noetic-tf-conversions libboost-all-dev python3-pybind11 libzip-dev python3-pip libspdlog-dev ros-noetic-rviz \
+    ros-noetic-rqt ros-noetic-rqt-tf-tree ros-noetic-rqt-graph ros-noetic-rqt-common-plugins && \
     rm -rf /var/lib/apt/lists/
 
 RUN wget ceres-solver.org/ceres-solver-2.1.0.tar.gz
