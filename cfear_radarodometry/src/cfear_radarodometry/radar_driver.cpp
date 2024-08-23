@@ -30,6 +30,12 @@ radarDriver::radarDriver(const Parameters& pars, bool disable_callback):par(pars
   if(!disable_callback){
     if(par.dataset=="oxford")
       sub = nh_.subscribe<sensor_msgs::Image>("/Navtech/Polar", 1000, &radarDriver::CallbackOxford, this);
+    else if (par.dataset=="aptiv")
+    {
+      // subscribe to the radar pointcloud2 topic
+      sub = nh_.subscribe<sensor_msgs::PointCloud2>("/Aptiv/Pt_VCS", 1000, &radarDriver::CallbackPointCloud2, this);
+      // print out sub object
+    }    
     else
       sub = nh_.subscribe<sensor_msgs::Image>("/Navtech/Polar", 1000, &radarDriver::Callback, this);
   }
@@ -58,9 +64,17 @@ void radarDriver::Process(){
     StructuredKStrongest filt(cv_polar_image, par.z_min, par.k_strongest, par.min_distance, par.range_res);
     filt.getPeaksFilteredPointCloud(cloud_filtered_, false);
     filt.getPeaksFilteredPointCloud(cloud_filtered_peaks_, true);
+    // std::cout << "Size of cloud_filtered_: " << cloud_filtered_->size() << std::endl;
+    // std::cout << "Size of cloud_filtered_peaks_: " << cloud_filtered_peaks_->size() << std::endl;
+    // pcl::PointXYZI max_point, min_point;
+    // pcl::getMinMax3D(*cloud_filtered_, min_point, max_point);
+    // std::cout << "Max X: " << max_point.x << std::endl;
+    // std::cout << "Min X: " << min_point.x << std::endl;
+    // std::cout << "Max Y: " << max_point.y << std::endl;
+    // std::cout << "Min Y: " << min_point.y << std::endl;
   }
-  //Fill header
 
+  //Fill header
   cloud_filtered_peaks_->header.frame_id = cloud_filtered_->header.frame_id = par.radar_frameid;
   const ros::Time tstamp = cv_polar_image->header.stamp;
   pcl_conversions::toPCL(tstamp, cloud_filtered_peaks_->header.stamp);
@@ -87,6 +101,43 @@ void radarDriver::Process(){
     CFEAR_Radarodometry::timing.Document("Filtering",CFEAR_Radarodometry::ToMs(t1-t0));
 
 
+  }
+
+  void radarDriver::CallbackPointCloud2(const sensor_msgs::PointCloud2ConstPtr &radar_point_cloud)
+  {
+    // Process the PointCloud2 message
+    // Example: Convert to PCL point cloud and process
+    ros::Time t0 = ros::Time::now();
+
+    // load the point cloud and assign it to cloud_filtered_ and cloud_filtered_peaks_
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZI>());
+    // pcl::fromROSMsg(*radar_point_cloud, *cloud);
+    for (sensor_msgs::PointCloud2ConstIterator<float> iter_x(*radar_point_cloud, "x"),
+         iter_y(*radar_point_cloud, "y"),
+         iter_z(*radar_point_cloud, "z"),
+         iter_intensity(*radar_point_cloud, "intensity");
+         iter_x != iter_x.end();
+         ++iter_x, ++iter_y, ++iter_z, ++iter_intensity)
+    {
+      pcl::PointXYZI point;
+      point.x = *iter_x;
+      point.y = *iter_y;
+      point.z = *iter_z;
+      point.intensity = 10000;
+
+      // Push the point into the PCL point cloud
+      cloud->push_back(point);
+    }
+    cloud_filtered_ = cloud;
+    cloud_filtered_peaks_ = cloud;
+
+    // Fill header
+    cloud_filtered_peaks_->header.frame_id = cloud_filtered_->header.frame_id = par.radar_frameid;
+    const ros::Time tstamp = radar_point_cloud->header.stamp;
+    pcl_conversions::toPCL(tstamp, cloud_filtered_->header.stamp);
+    pcl_conversions::toPCL(tstamp, cloud_filtered_peaks_->header.stamp);
+    pub_filtered_.publish(cloud_filtered_);
+    pub_peaks_.publish(cloud_filtered_peaks_);
   }
 
   /*Assumptions:
@@ -172,7 +223,26 @@ void radarDriver::Process(){
     cloud_peaks = cloud_filtered_peaks_;
     cloud_peaks->header = cloud_filtered_peaks_->header;
 
+    // print size of cloud, min x, max x, min y, max y, min z, max z, min intensity, max intensity
+    // cout << "Size of cloud: " << cloud->size() << endl;
+    pcl::PointXYZI max_point, min_point;
+    pcl::getMinMax3D(*cloud, min_point, max_point);
+    // cout << "Max X: " << max_point.x << endl;
+    // cout << "Min X: " << min_point.x << endl;
+    // cout << "Max Y: " << max_point.y << endl;
+    // cout << "Min Y: " << min_point.y << endl;
+    // cout << "Max Z: " << max_point.z << endl;
+    // cout << "Min Z: " << min_point.z << endl;
+    cout << "Max Intensity: " << max_point.intensity << endl;
+    cout << "Min Intensity: " << min_point.intensity << endl;
 
   }
 
+  void radarDriver::CallbackOfflinePointCloud(const sensor_msgs::PointCloud2ConstPtr& radar_point_cloud,  pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud, pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_peaks){
+    CallbackPointCloud2(radar_point_cloud);
+    cloud = cloud_filtered_;
+    cloud->header = cloud_filtered_->header;
+    cloud_peaks = cloud_filtered_peaks_;
+    cloud_peaks->header = cloud_filtered_peaks_->header;
+  }
 }

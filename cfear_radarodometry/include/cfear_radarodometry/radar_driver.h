@@ -4,6 +4,8 @@
 #include "pcl/point_types.h"
 #include "pcl_ros/point_cloud.h"
 #include "sensor_msgs/Image.h"
+#include <sensor_msgs/PointCloud2.h> // Include the header for PointCloud2
+#include <sensor_msgs/point_cloud2_iterator.h>
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.h>
 #include "ros/subscriber.h"
@@ -88,6 +90,7 @@ public:
   ~radarDriver(){}
 
   void CallbackOffline(const sensor_msgs::ImageConstPtr &radar_image_polar, pcl::PointCloud<pcl::PointXYZI>::Ptr &cloud,  pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_peaks);
+  void CallbackOfflinePointCloud(const sensor_msgs::PointCloud2ConstPtr& radar_point_cloud, pcl::PointCloud<pcl::PointXYZI>::Ptr &cloud,  pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_peaks);
 
   cv_bridge::CvImagePtr cv_polar_image; //Latest radar image
 
@@ -99,6 +102,8 @@ private:
   void Callback(const sensor_msgs::ImageConstPtr &radar_image_polar);
 
   void CallbackOxford(const sensor_msgs::ImageConstPtr &radar_image_polar);
+
+  void CallbackPointCloud2(const sensor_msgs::PointCloud2ConstPtr &radar_image_polar);
 
   void Process();
 

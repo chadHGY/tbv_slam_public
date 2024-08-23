@@ -64,7 +64,8 @@ public:
     rosbag::Bag bag;
     bag.open(p.bag_file_path, rosbag::bagmode::Read);
 
-    std::vector<std::string> topics = {"/Navtech/Polar","/gt"};
+    std::vector<std::string> topics = {"/Navtech/Polar","/gt","/Aptiv/Pt_VCS"};
+    // std::vector<std::string> topics = {"/Aptiv/Pt_VCS","/gt"};
     rosbag::View view(bag, rosbag::TopicQuery(topics));
 
     int frame = 0;
@@ -75,6 +76,9 @@ public:
 
       if(!ros::ok())
         break;
+      
+      // if (frame > 5)
+      //   break;
 
       nav_msgs::Odometry::ConstPtr odom_msg = m.instantiate<nav_msgs::Odometry>();
       if (odom_msg != NULL){
@@ -111,16 +115,31 @@ public:
           cv::imwrite(path, driver.cv_polar_image->image);
         }
 
-
-
-
         eval.CallbackESTEigen(poseStamped(Tcurrent, cov_current, image_msg->header.stamp));
         ros::Time tnow = ros::Time::now();
         ros::Duration d = ros::Duration(tnow-tinit);
         static ros::Duration tot(0);
         tot +=d;
         //usleep(100*1000);
+      }
 
+      // sensor msg from pointcloud2
+      sensor_msgs::PointCloud2ConstPtr cloud_msg = m.instantiate<sensor_msgs::PointCloud2>();
+      if(cloud_msg != NULL) {
+        ros::Time tinit = ros::Time::now();
+        pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_filtered, cloud_filtered_peaks;
+        driver.CallbackOfflinePointCloud(cloud_msg, cloud_filtered, cloud_filtered_peaks);
+        CFEAR_Radarodometry::timing.Document("Filtered points",cloud_filtered->size());
+        Eigen::Affine3d Tcurrent;
+        Covariance cov_current;
+
+        fuser.pointcloudCallback(cloud_filtered, cloud_filtered_peaks, Tcurrent, cloud_msg->header.stamp, cov_current);
+        
+        eval.CallbackESTEigen(poseStamped(Tcurrent, cov_current, cloud_msg->header.stamp));
+        ros::Time tnow = ros::Time::now();
+        ros::Duration d = ros::Duration(tnow-tinit);
+        static ros::Duration tot(0);
+        tot +=d;
 
         cout<<"Frame: "<<frame<<", dur: "<<d<<", avg: "<<++frame/tot.toSec()<<endl;
       }
