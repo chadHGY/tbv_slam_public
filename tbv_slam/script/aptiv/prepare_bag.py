@@ -14,7 +14,8 @@ from tf2_msgs.msg import TFMessage
 from nav_msgs.msg import Odometry
 import sensor_msgs.point_cloud2 as pc2
 from std_msgs.msg import Header
-
+from pyproj import Transformer
+import matplotlib.pyplot as plt
 
 MATRIX_MATCH_TOLERANCE = 1e-4
 
@@ -129,7 +130,7 @@ def so3_to_quaternion(so3):
     return np.array([w, x, y, z])
 
 
-def ProcessFrame(params, Tprev, frame_nr, stamp):  # write Fibonacci series up to n
+def ProcessFrame(params, Tprev, stamp):  # write Fibonacci series up to n
     Tinc = build_se3_transform(params)
     Tupd = Tprev * Tinc
 
@@ -137,10 +138,11 @@ def ProcessFrame(params, Tprev, frame_nr, stamp):  # write Fibonacci series up t
     t.header.frame_id = "/world"
     t.header.stamp = stamp
     t.child_frame_id = "/navtech"
-    t.transform.translation.x = Tupd[0, 3]
-    t.transform.translation.y = Tupd[1, 3]
+    # t.transform.translation.x = Tupd[0, 3]
+    # t.transform.translation.y = Tupd[1, 3]
+    t.transform.translation.x = params[0]
+    t.transform.translation.y = params[1]
     t.transform.translation.z = 0.0
-    # print(t.transform.translation)
 
     qupd = so3_to_quaternion(Tupd[0:3, 0:3])
     t.transform.rotation.x = qupd[1]
@@ -151,7 +153,6 @@ def ProcessFrame(params, Tprev, frame_nr, stamp):  # write Fibonacci series up t
     return Tupd, t
 
 
-# %%
 def create_2d_point_cloud(
     points: np.array, timestamp: rospy.rostime.Time
 ) -> PointCloud2:
@@ -199,6 +200,62 @@ def create_2d_point_cloud(
     return point_cloud_msg
 
 
+def latlon_to_xy(lat, lon, zone=32):
+    # Create a Transformer object for transforming coordinates
+    transformer = Transformer.from_crs(
+        f"epsg:4326", f"epsg:{32600+zone}", always_xy=True
+    )
+
+    # Apply the transformation (note the order: lon, lat)
+    x, y = transformer.transform(lon, lat)
+    return x, y
+
+
+def get_gps_trajectory(data_path, log_name) -> np.ndarray:
+    with h5py.File(os.path.join(data_path, "Meta", log_name + ".h5"), "r") as meta_fh:
+        host_position = meta_fh["T0"][:, 3, :2]
+        meta_timestamps = meta_fh["timestamps"][:, 0]
+
+    with h5py.File(os.path.join(data_path, "GPS", log_name + ".h5"), "r") as gps_fh:
+        from pyquaternion import Quaternion
+
+        applanix_pos = gps_fh["sensors"]["WUP_GoFast_Applanix"]["position"][:, :2]
+        applanix_ts = gps_fh["sensors"]["WUP_GoFast_Applanix"]["timestamps"][:, 0]
+        applanix_orient = gps_fh["sensors"]["WUP_GoFast_Applanix"]["orientation"][()]
+        applanix_quat = [
+            Quaternion(applanix_orient[i]) for i in range(applanix_orient.shape[0])
+        ]
+
+    # Mapping meta to applanix index
+    meta_applanix_map = np.argmin(
+        np.abs(meta_timestamps[:, None] - applanix_ts[None, :]), axis=-1
+    )
+
+    # Create the applanix position in T0 VCS
+    appl_pos_xy = np.stack(latlon_to_xy(applanix_pos[:, 1], applanix_pos[:, 0]), axis=1)
+
+    # y points to the right
+    appl_pos_xy[:, 1] *= -1
+
+    # Normalize to VCS of timestamp 0
+    appl_pos_rel_xy = appl_pos_xy - appl_pos_xy[meta_applanix_map[0]]
+
+    ## Initial orientation
+    # Velocity based
+    vel_0 = (
+        appl_pos_rel_xy[meta_applanix_map[10]] - appl_pos_rel_xy[meta_applanix_map[0]]
+    )
+    angle = np.arctan2(vel_0[1], vel_0[0])
+    rot_mat_t = np.array(
+        [[np.cos(-angle), np.sin(-angle)], [-np.sin(-angle), np.cos(-angle)]]
+    )
+
+    # Applanix CS based
+    # rot_mat_t = applanix_quat[meta_applanix_map[0]].rotation_matrix[:2,:2] @ np.array([[0,1], [-1,0]])
+    appl_pos_rel_xy = appl_pos_rel_xy @ rot_mat_t
+    return appl_pos_rel_xy
+
+
 # %% Example point cloud data, intensity values, and timestamps
 point_clouds = [
     (
@@ -216,25 +273,35 @@ point_clouds = [
 ]
 
 # %% load data
+data_path = "/workspaces/tbv_ws/datasets/aptiv/cluster/aiperception_cluster_data/online/TrainingTooling_Data/WUP_GoFast_SFW_Gen6_TT_v2_batch_pivot_fix_v15-6-0-0/End2End"
+
 log_name = (
     "WUP_GoFast_Gen6-20231010T121645Z053__20231010T121656Z189_20231010T121708Z389"
 )
-point_cloud_path = f"/workspaces/tbv_ws/datasets/aptiv/cluster/aiperception_cluster_data/online/TrainingTooling_Data/WUP_GoFast_SFW_Gen6_TT_v2_batch_pivot_fix_v15-6-0-0/End2End/output/semseg_stationary/{log_name}.h5"
+point_cloud_path = f"{data_path}/output/semseg_stationary/{log_name}.h5"
 output_dir = f"/workspaces/tbv_ws/datasets/2023_TBV_Radar_SLAM/radar_data_ORU/Aptiv/{log_name}/radar"
+slam_estimation_path = f"{data_path}/output/slam_estimation/{log_name}.h5"
 
-slam_estimation_path = f"/workspaces/tbv_ws/datasets/aptiv/cluster/aiperception_cluster_data/online/TrainingTooling_Data/WUP_GoFast_SFW_Gen6_TT_v2_batch_pivot_fix_v15-6-0-0/End2End/output/slam_estimation/{log_name}.h5"
 
 with h5py.File(slam_estimation_path, "r") as f:
-    ego_positions_framewise = f["ego_positions_framewise"][:]
-    ego_positions_framewise_slices = f["ego_positions_framewise_slices"][:]
-ego_positions = ego_positions_framewise[
-    ego_positions_framewise_slices.squeeze(), 1:4
-]  # (n_frames, 3 (x, y, yaw))
+    ego_positions = f["ego_positions"][:]
+ego_positions = np.asarray(ego_positions)
+
 
 with h5py.File(point_cloud_path, "r") as f:
     pts_stationary = f["pts_stationary"][:]
     timestamps = f["timestamps"][:]
 timestamps[0]
+
+
+# %%
+# plot the trajectory
+appl_pos_rel_xy = get_gps_trajectory(data_path, log_name)
+plt.plot(appl_pos_rel_xy[:, 1], appl_pos_rel_xy[:, 0], label="Applanix")
+plt.plot(ego_positions[:, 1], ego_positions[:, 0], label="Slam")
+plt.legend()
+plt.show()
+
 
 # %%
 pose_init, prev_pos = [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]
@@ -248,18 +315,31 @@ for frame_id, timestamp in enumerate(timestamps):
     if frame_id == 0:
         curr_inc = [0, 0, 0, 0, 0, 0]
     else:
+        # x, y, yaw = (
+        #     float(cur_pos[0] - prev_pos[0]),
+        #     float(cur_pos[1] - prev_pos[1]),
+        #     float(cur_pos[2] - prev_pos[2]),
+        # )
+        x, y, yaw = (
+            float(cur_pos[0]),
+            float(cur_pos[1]),
+            # float(cur_pos[2]),
+            float(cur_pos[2] - prev_pos[2]),
+        )
+        # make yaw from rad to deg
+        # yaw = yaw * 180 / np.pi
         curr_inc = [
-            Decimal(float(cur_pos[0] - prev_pos[0])),  # x
-            Decimal(float(cur_pos[1] - prev_pos[1])),  # y
+            Decimal(x),  # x
+            Decimal(y),  # y
             0,
             0,
             0,
-            Decimal(float(cur_pos[2] - prev_pos[2])),  # yaw
+            Decimal(yaw),  # yaw
         ]
 
     # --- tf transform data ---
     Tpose, tf_transform = ProcessFrame(
-        curr_inc, Tpose, curr_inc, ros_timestamp
+        curr_inc, Tpose, ros_timestamp
     )  ## read input transormation and perform fwdkinematics
     prev_pos = cur_pos
 
@@ -299,6 +379,7 @@ finally:
     bag.close()
 
 # %% check gt data format
+"""
 import pandas as pd
 
 df = pd.read_csv(
@@ -320,5 +401,5 @@ plt.xlabel("x")
 plt.ylabel("y")
 plt.title("Ground Truth")
 plt.show()
-
+"""
 # %%
