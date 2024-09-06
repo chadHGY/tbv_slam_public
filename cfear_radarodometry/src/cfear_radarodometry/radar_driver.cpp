@@ -123,7 +123,8 @@ void radarDriver::Process(){
       point.x = *iter_x;
       point.y = *iter_y;
       point.z = *iter_z;
-      point.intensity = 10000;
+      // point.intensity = 10000;
+      point.intensity = *iter_intensity*255;
 
       // Push the point into the PCL point cloud
       cloud->push_back(point);
@@ -233,9 +234,8 @@ void radarDriver::Process(){
     // cout << "Min Y: " << min_point.y << endl;
     // cout << "Max Z: " << max_point.z << endl;
     // cout << "Min Z: " << min_point.z << endl;
-    cout << "Max Intensity: " << max_point.intensity << endl;
-    cout << "Min Intensity: " << min_point.intensity << endl;
-
+    // cout << "Max Intensity: " << max_point.intensity << endl;
+    // cout << "Min Intensity: " << min_point.intensity << endl;
   }
 
   void radarDriver::CallbackOfflinePointCloud(const sensor_msgs::PointCloud2ConstPtr& radar_point_cloud,  pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud, pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_peaks){
